@@ -1,70 +1,84 @@
 import torch
-from Utils.dataloader_train import IntramodalDatasetwithPreprocess
 from Utils.dataloader_test import IntramodalInferenceDatasetwthpreprocess
+import warnings
+warnings.filterwarnings("ignore")
 print(torch.__version__)
-import torch.utils.data as Data
-from Utils import dataloader, dataloader_train
-import torch.nn as nn
-import wandb
-import os
-import piq
+
 from Models.CompleteModel import CompleteModel
-#import train as train_module
-import variable as var
+import imageio
+from PIL import Image
+import nibabel as nb
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+complete_model_inference = CompleteModel(gumbel=True, maxpool=False, bilinear=True, tau_min=0.5, Cb=4,
+                                         without_activation=True)  # .to("cuda")
+PATH = '../code/Results/disentangled_latent_space/latent_space_harmonization_tau5_without_maxpool_without_transpose_with_activation_300.pth'
+checkpoint = torch.load(PATH,map_location=torch.device('cpu'))
+complete_model_inference.load_state_dict(checkpoint)
+
 
 class test:
-    def eval_loss(epoch=1):
-        reconstruction_loss_lst = []
-        hard_epoch = 300.0
-        reconstruction_loss_lst = []
-        cosine_similarity_loss_lst = []
-        total_loss_lst = []
-        ssim_loss_lst = []
-        tones = torch.ones(size=(256, 256))  # .to("opencl")
-        teps = torch.Tensor([1e-12])  # .to("opencl")
-        sim_loss = 0.0
+    def inference_run1(epoch=1):
+        example_number = 0
+        beta_np_lst = []
+        unet_lst = []
+        probmaps_np_lst = []
         inference_generator = IntramodalInferenceDatasetwthpreprocess.inference_generator(self=None)
         for X, Y in inference_generator:
             X = X.float()  # .to("opencl")
             Y = Y.float()  # .to("opencl")
-            x_size = X.size()
-            batch_size = x_size[0]
-            u_x, u_y, d1, d2, d3, d4, o_x, o_y, t_x, t_y, r1, r2, r3, r4, theta_selection_lst_recon =var.complete_model(X,
-                                                                                                                     Y,
-                                                                                                                     epoch,
-                                                                                                                     hard_epoch=hard_epoch)
-
-            tmp_lst = []
-            for theta in theta_selection_lst_recon:
-                if (theta == 0):
-                    tmp_lst.append(X)
-                else:
-                    tmp_lst.append(Y)
-
-            # Find reconsturction MSE loss between images
-            # Here we pass theta 1 and theta 2 alternately hence we should compare with T1 and T2 alternatiely
-            recon_loss_1 = var.reconstruction_loss(tmp_lst[0], r1)
-            recon_loss_2 = var.reconstruction_loss(tmp_lst[1], r2)
-            recon_loss_3 = var.reconstruction_loss(tmp_lst[2], r3)
-            recon_loss_4 = var.reconstruction_loss(tmp_lst[3], r4)
-
-            fsim_loss_1 = 1 - piq.fsim(tmp_lst[0], r1, data_range=1.0, chromatic=False)
-            fsim_loss_2 = 1 - piq.fsim(tmp_lst[1], r2, data_range=1.0, chromatic=False)
-            fsim_loss_3 = 1 - piq.fsim(tmp_lst[2], r3, data_range=1.0, chromatic=False)
-            fsim_loss_4 = 1 - piq.fsim(tmp_lst[3], r4, data_range=1.0, chromatic=False)
-
-            recon_loss = ((recon_loss_1 + recon_loss_2 + recon_loss_3 + recon_loss_4) / 4.0)
-            fsim_loss = ((fsim_loss_1 + fsim_loss_2 + fsim_loss_3 + fsim_loss_4) / 4.0)
-            sim_loss_cosine = 1.0 - var.similarity_loss(o_x.view(batch_size, var.config["Cb"], -1),
-                                                    o_y.view(batch_size, var.config["Cb"], -1)).mean()
-            sim_loss = sim_loss_cosine
-            total_loss = var.hyperparam1 * recon_loss + var.hyperparam2 * var.lmbda * sim_loss
-            reconstruction_loss_lst.append(recon_loss.detach().cpu().numpy().item())
-            cosine_similarity_loss_lst.append(sim_loss_cosine.detach().cpu().numpy().item())
-            total_loss_lst.append(total_loss.detach().cpu().numpy().item())
-            ssim_loss_lst.append(fsim_loss.detach().cpu().numpy().item())
-
-
-            del X, Y, u_x, t_x, u_y, t_y, r1, r2, r3, r4, d1, d2, d3, d4, o_x, o_y, tmp_lst, theta_selection_lst_recon
+            u_x, u_y, d1, d2, d3, d4, o_x, o_y, t_x, t_y, r1, r2, r3, r4, theta_selection_lst_recon = complete_model_inference(
+                X,
+                Y,
+                epoch)
+            print(t_x)
+            unet_lst.append(u_x.detach().cpu().numpy())
+            print(t_y)
+            print(" -============== ============ ============== ")
+            print()
+            unet_lst.append(u_y.detach().cpu().numpy())
+            unet_lst.append(d1.detach().cpu().numpy())
+            unet_lst.append(d2.detach().cpu().numpy())
+            beta_np_lst.append([o_x.detach().cpu().numpy(), o_y.detach().cpu().numpy()])
+            r1_np = r1.detach().cpu().numpy()
+            r2_np = r2.detach().cpu().numpy()
+            r3_np = r3.detach().cpu().numpy()
+            r4_np = r4.detach().cpu().numpy()
+            nb.save(nb.Nifti1Image(r1_np, affine=np.eye(4)),
+                    '../Results/warped_images/r1_np' + str(example_number) + ".nii.gz")
+            nb.save(nb.Nifti1Image(r1_np, affine=np.eye(4)),
+                    '../Results/warped_images/r2_np' + str(example_number) + ".nii.gz")
+            nb.save(nb.Nifti1Image(r1_np, affine=np.eye(4)),
+                    '../Results/warped_images/r3_np' + str(example_number) + ".nii.gz")
+            nb.save(nb.Nifti1Image(r1_np, affine=np.eye(4)),
+                    '../Results/warped_images/r4_np' + str(example_number) + ".nii.gz")
+            imageio.imwrite('../Results/warped_images/r1_np' + str(example_number) + ".jpg",
+                            r1_np[0, 0, :, :])
+            imageio.imwrite('../Results/warped_images/r2_np' + str(example_number) + ".jpg",
+                            r2_np[0, 0, :, :])
+            imageio.imwrite('../Results/warped_images/r3_np' + str(example_number) + ".jpg",
+                            r3_np[0, 0, :, :])
+            imageio.imwrite('../Results/warped_images/r4_np' + str(example_number) + ".jpg",
+                            r4_np[0, 0, :, :])
+            del X, Y, u_x, t_x, u_y, t_y, r1, r2, r3, r4, d1, d2, d3, d4
             # torch.cuda.empty_cache()
-            return cosine_similarity_loss_lst, ssim_loss_lst, reconstruction_loss_lst, total_loss_lst
+            example_number = example_number + 1
+
+            if (example_number > 6):
+                break;
+        return beta_np_lst, unet_lst, probmaps_np_lst
+
+os.chdir('../code/Utils')
+beta_lst, unet_lst, probmaps_np_lst = test.inference_run1(epoch=1)
+
+image = Image.open('../Results/warped_images/r2_np1.jpg')
+data = np.asfarray(image)
+plt.figure(figsize=(7, 7))
+plt.imshow(data, cmap="Greys_r")
+plt.show()
+image = Image.open('../Results/warped_images/r1_np1.jpg')
+data = np.asfarray(image)
+plt.figure(figsize=(7, 7))
+plt.imshow(data, cmap="Greys_r")
+plt.show()
